@@ -5,6 +5,91 @@ function onError(e) {
   console.log("Error!!");
 }
 
+var project = {
+  'subProjectKey': {
+    data: {
+      name: ''
+    }
+  }
+}
+
+function Project(projectKey) {
+  var key = projectKey;
+  var files = [];
+  var filesByFileKey = {};
+  var subProjects = {};
+  var duplications = {};
+  this.addFile = function (file) {
+    files.push(file);
+    subProjects[file.subProject] = 1;
+    filesByFileKey[file.key] = file;
+  }
+
+  this.getFiles = function(){
+    return files;
+  }
+
+  this.getDuplications = function(){
+    return duplications;
+  }
+
+  var fileByFileKey = function (fileKey) {
+    return filesByFileKey[fileKey];
+  }
+  this.addDuplication = function (fileKey1, fileKey2, numberOfLines) {
+    var file1 = fileByFileKey(fileKey1);
+    var file2 = fileByFileKey(fileKey2);
+
+    if (!file1 || !file2) {
+      return;
+    }
+
+    var duplication = new Duplication(file1, file2, numberOfLines);
+    var existingDuplication = duplications[duplication.key()];
+    if (existingDuplication) {
+      existingDuplication.add(numberOfLines)
+      duplication = existingDuplication;
+    }
+    duplications[duplication.key()] = duplication;
+  }
+  this.numberOfFiles = function() {
+    return files.length;
+  }
+}
+
+function File(fileKey, numberOfDuplicatedLines) {
+  this.key = fileKey;
+  this.numberOfDuplicatedLines = numberOfDuplicatedLines;
+  this.subProject = fileKey.substring(0, fileKey.lastIndexOf(':'));
+}
+
+function Duplication(f1, f2, numberOfLines) {
+  var file1 = f1;
+  var file2 = f2;
+  var numberOfLines = numberOfLines;
+  this.key = function () {
+    var result = compare(file1.key, file2.key);
+    return result.min + '-' + result.max;
+  }
+  this.add = function (additionalNumberOfLines) {
+    numberOfLines += additionalNumberOfLines;
+  }
+
+  var self = this;
+  this.toString = function(){
+    return file1 + '^^^' + file2 + '^^^' + numberOfLines;
+  }
+
+  this.getFile1 = function(){
+    return file1;
+  }
+  this.getFile2 = function(){
+    return file2;
+  }
+  this.getNumberOfLines = function(){
+    return numberOfLines / 2;
+  }
+}
 
 var nodeKeys = {};
 var edges = {};
@@ -18,6 +103,7 @@ var graphEdges = new vis.DataSet([]);
 var network = null;
 
 function getProjectFilesWithDuplicatedLines(projectKey) {
+  var project = new Project(projectKey);
   var onLoad = function () {
     var response = JSON.parse(this.responseText);
     var files = response.components;
@@ -27,49 +113,48 @@ function getProjectFilesWithDuplicatedLines(projectKey) {
     for (var i = 0; i < files.length; i++) {
       var file = files[i];
 
-      if (file.measures[0].value == 0) {
+      var numberOfDuplicatedLines = file.measures[0].value;
+      if (numberOfDuplicatedLines == 0) {
         continue;
       }
 
-      var group = file.key.substring(0, file.key.lastIndexOf(':') - 1);
-      groups.push(group);
-      graphNodes.add({ id: file.key, 'group': group, title: file.key, value: file.measures[0].value });
-      nodeKeys[file.key] = 1;
+      var projectFile = new File(file.key, numberOfDuplicatedLines);
+      project.addFile(projectFile);
 
-      sendQuery('api/duplications/show', { 'key': file.key }, function (fromKey) {
+      function fetchDuplications(fromKey) {
         return function () {
           responseCounts++;
           var edgeResponse = JSON.parse(this.responseText);
-          for (var property in edgeResponse.files) {
-            if (edgeResponse.files.hasOwnProperty(property) &&
-              nodeKeys.hasOwnProperty(edgeResponse.files[property].key) &&
-              edgeResponse.files[property].key != fromKey) {
-
-              var c = compare(edgeResponse.files[property].key, fromKey);
-
-              if (!graphEdges.hasOwnProperty(c.min)) {
-                graphEdges[c.min] = {};
-
-              }
-
-              if (!graphEdges[c.min].hasOwnProperty(c.max)) {
-                graphEdges[c.min][c.max] = 1;
-                graphEdges.add({ to: edgeResponse.files[property].key, from: fromKey });
+          var fileKeysByRef = {};
+          for (var fileRef in edgeResponse.files) {
+            fileKeysByRef[fileRef] = edgeResponse.files[fileRef].key;
+          }
+          for (var d in edgeResponse.duplications) {
+            var blocks = edgeResponse.duplications[d].blocks;
+            for (var i = 0; i < blocks.length; i++) {
+              var block = blocks[i];
+              var fileKey = fileKeysByRef[block._ref];
+              if (fileKey != fromKey) {
+                var numberOfLinesInBlock = block.size;
+                project.addDuplication(fromKey, fileKey, numberOfLinesInBlock);
               }
             }
           }
-
-          if (graphNodes.length == responseCounts) {
-            displayGraph(graphNodes, graphEdges);
+          if (project.numberOfFiles() == responseCounts) {
+            displayGraph(project);
           }
         }
-      } (file.key));
+
+
+      }
+
+      sendQuery('api/duplications/show', { 'key': file.key }, fetchDuplications(file.key));
     }
   }
 
   var qp = {
     asc: false,
-    ps: 500,
+    ps: 20,
     metricSortFilter: 'withMeasuresOnly',
     p: 1,
     s: 'metric,name',
@@ -90,7 +175,23 @@ function compare(a, b) {
 }
 
 
-function displayGraph(nodes, edges) {
+function displayGraph(project) {
+  var nodes = [];
+  var edges = [];
+  var files = project.getFiles();
+  for(var i = 0; i < files.length; i++){
+    var file = files[i];
+    nodes.push({ id: file.key, 'group': file.subProject, title: file.key, value: file.numberOfDuplicatedLines });
+  }
+
+  var duplications = project.getDuplications();
+  for (duplicationKey in duplications){
+    if (duplications.hasOwnProperty(duplicationKey)){
+      var duplication = duplications[duplicationKey];
+      edges.push({ from: duplication.getFile1().key, to: duplication.getFile2().key, value: duplication.getNumberOfLines()});
+    }
+  }
+
   var container = document.getElementById('container');
   var data = {
     nodes: nodes,
@@ -103,50 +204,50 @@ function displayGraph(nodes, edges) {
     nodes: {
       shape: 'dot'
     },
-    physics:{
-       barnesHut:{
-         gravitationalConstant: -60000,
-         springConstant:0.02
-       }
-     }
+    physics: {
+      barnesHut: {
+        gravitationalConstant: -60000,
+        springConstant: 0.02
+      }
+    }
   };
   network = new vis.Network(container, data, options);
-  network.on("selectNode", function(params) {
-      if (params.nodes.length == 1) {
-          if (network.isCluster(params.nodes[0]) == true) {
-            clusterAll();
-            network.openCluster(params.nodes[0]);
-          }
-      }
-  });
+  // network.on("selectNode", function (params) {
+  //   if (params.nodes.length == 1) {
+  //     if (network.isCluster(params.nodes[0]) == true) {
+  //       clusterAll();
+  //       network.openCluster(params.nodes[0]);
+  //     }
+  //   }
+  // });
 
-  clusterAll();
+  // clusterAll();
 }
 
-function clusterAll(){
+function clusterAll() {
   for (var i = 0; i < groups.length; i++) {
     var currentGroup = groups[i];
     doCluster(currentGroup);
   }
 }
 
-function doCluster(currentGroup){
+function doCluster(currentGroup) {
   var clusterOptionsByData = {
-      joinCondition: function (childOptions) {
-        return childOptions.group == currentGroup;
-      },
-      processProperties: function (clusterOptions, childNodes, childEdges) {
-        var totalMass = 0;
-        for (var i = 0; i < childNodes.length; i++) {
-          totalMass += childNodes[i].value;
-          clusterOptions.color = childNodes[i].color;
-        }
-        clusterOptions.value = totalMass;
-        return clusterOptions;
-      },
-      clusterNodeProperties: { id: 'cluster:' + currentGroup, borderWidth: 3, shape: 'dot', title: currentGroup, label: '' }
-    };
-    network.cluster(clusterOptionsByData);
+    joinCondition: function (childOptions) {
+      return childOptions.group == currentGroup;
+    },
+    processProperties: function (clusterOptions, childNodes, childEdges) {
+      var totalMass = 0;
+      for (var i = 0; i < childNodes.length; i++) {
+        totalMass += childNodes[i].value;
+        clusterOptions.color = childNodes[i].color;
+      }
+      clusterOptions.value = totalMass;
+      return clusterOptions;
+    },
+    clusterNodeProperties: { id: 'cluster:' + currentGroup, borderWidth: 3, shape: 'dot', title: currentGroup, label: '' }
+  };
+  network.cluster(clusterOptionsByData);
 }
 
 function sendQuery(baseWs, parameter, callback) {
