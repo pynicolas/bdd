@@ -212,7 +212,7 @@ function displayGraph(project) {
         var file = files[i];
         subProjectValue += file.numberOfDuplicatedLines;
       }
-      nodes.push({ id: subProjectKey, 'group': subProjectKey, title: subProjectKey, value: subProjectValue, shape: 'star' });
+      nodes.push({ id: subProjectKey, 'group': subProjectKey, title: subProjectKey, value: subProjectValue });
     }
   }
 
@@ -308,7 +308,7 @@ function displayHalfExplodedGraph(project, spk, subProjectDuplications) {
           var file = files[i];
           subProjectValue += file.numberOfDuplicatedLines;
         }
-        nodes.push({ id: subProjectKey, 'group': subProjectKey, title: subProjectKey, value: subProjectValue, shape: 'star' });
+        nodes.push({ id: subProjectKey, 'group': subProjectKey, title: subProjectKey, value: subProjectValue });
       } else {
         var files = filesBySubProjectKey[spk];
         for (var i = 0; i < files.length; i++) {
@@ -400,8 +400,9 @@ function displayHalfExplodedGraph(project, spk, subProjectDuplications) {
     },
     physics: {
       barnesHut: {
-        gravitationalConstant: -60000,
-        springConstant: 0.02
+        centralGravity: 0.5,
+//        gravitationalConstant: -500,
+//        springConstant: 0.01
       }
     }
   };
@@ -471,5 +472,6 @@ function sendQuery(baseWs, parameter, callback) {
 }
 
 
-//getDuplicationsByUuid("AVPu5O1a_WSHCtbxw-SI");
+//getProjectFilesWithDuplicatedLines('org.sonarsource.java:java');
 getProjectFilesWithDuplicatedLines('sa-dotnet');
+//getProjectFilesWithDuplicatedLines('org.sonarsource.sonarqube:sonarqube');
