@@ -17,19 +17,30 @@ function Project(projectKey) {
   var key = projectKey;
   var files = [];
   var filesByFileKey = {};
-  var subProjects = {};
+  var filesBySubProjectKey = {};
+  var subProjectKeys = {};
   var duplications = {};
   this.addFile = function (file) {
     files.push(file);
-    subProjects[file.subProject] = 1;
+    subProjectKeys[file.subProjectKey] = 1;
+    var subProjectFiles = filesBySubProjectKey[file.subProjectKey];
+    if (!subProjectFiles) {
+      subProjectFiles = [];
+      filesBySubProjectKey[file.subProjectKey] = subProjectFiles;
+    }
+    subProjectFiles.push(file);
     filesByFileKey[file.key] = file;
   }
 
-  this.getFiles = function(){
+  this.getFiles = function () {
     return files;
   }
 
-  this.getDuplications = function(){
+  this.getFilesBySubProjectKey = function () {
+    return filesBySubProjectKey;
+  }
+
+  this.getDuplications = function () {
     return duplications;
   }
 
@@ -52,7 +63,7 @@ function Project(projectKey) {
     }
     duplications[duplication.key()] = duplication;
   }
-  this.numberOfFiles = function() {
+  this.numberOfFiles = function () {
     return files.length;
   }
 }
@@ -60,7 +71,7 @@ function Project(projectKey) {
 function File(fileKey, numberOfDuplicatedLines) {
   this.key = fileKey;
   this.numberOfDuplicatedLines = numberOfDuplicatedLines;
-  this.subProject = fileKey.substring(0, fileKey.lastIndexOf(':'));
+  this.subProjectKey = fileKey.substring(0, fileKey.lastIndexOf(':'));
 }
 
 function Duplication(f1, f2, numberOfLines) {
@@ -76,18 +87,40 @@ function Duplication(f1, f2, numberOfLines) {
   }
 
   var self = this;
-  this.toString = function(){
+  this.toString = function () {
     return file1 + '^^^' + file2 + '^^^' + numberOfLines;
   }
 
-  this.getFile1 = function(){
+  this.getFile1 = function () {
     return file1;
   }
-  this.getFile2 = function(){
+  this.getFile2 = function () {
     return file2;
   }
-  this.getNumberOfLines = function(){
+  this.getNumberOfLines = function () {
     return numberOfLines / 2;
+  }
+}
+
+function SubProjectDuplication(k1, k2, numberOfLines) {
+  this.k1 = k1;
+  this.k2 = k2;
+  var numberOfLines = numberOfLines;
+  this.key = function () {
+    var result = compare(k1, k2);
+    return result.min + '-' + result.max;
+  }
+  this.add = function (additionalNumberOfLines) {
+    numberOfLines += additionalNumberOfLines;
+  }
+
+  var self = this;
+  this.toString = function () {
+    return k1 + '^^^' + k2 + '^^^' + numberOfLines;
+  }
+
+  this.getNumberOfLines = function () {
+    return numberOfLines;
   }
 }
 
@@ -178,19 +211,62 @@ function compare(a, b) {
 function displayGraph(project) {
   var nodes = [];
   var edges = [];
-  var files = project.getFiles();
-  for(var i = 0; i < files.length; i++){
-    var file = files[i];
-    nodes.push({ id: file.key, 'group': file.subProject, title: file.key, value: file.numberOfDuplicatedLines });
+  var filesBySubProjectKey = project.getFilesBySubProjectKey();
+  for (var subProjectKey in filesBySubProjectKey) {
+    if (filesBySubProjectKey.hasOwnProperty(subProjectKey)) {
+      var files = filesBySubProjectKey[subProjectKey];
+      var subProjectValue = 0;
+      for (var i = 0; i < files.length; i++) {
+        var file = files[i];
+        subProjectValue += file.numberOfDuplicatedLines;
+      }
+    }
+    nodes.push({ id: subProjectKey, 'group': subProjectKey, title: subProjectKey, value: subProjectValue });
   }
 
+ var subProjectDuplications = {};
+
+
   var duplications = project.getDuplications();
-  for (duplicationKey in duplications){
-    if (duplications.hasOwnProperty(duplicationKey)){
+  for (duplicationKey in duplications) {
+    if (duplications.hasOwnProperty(duplicationKey)) {
       var duplication = duplications[duplicationKey];
-      edges.push({ from: duplication.getFile1().key, to: duplication.getFile2().key, value: duplication.getNumberOfLines()});
+      var s1 = duplication.getFile1().subProjectKey;
+      var s2 = duplication.getFile2().subProjectKey;
+      if (s1 == s2) {
+        continue;
+      }
+      var sbd = new SubProjectDuplication(s1, s2, duplication.getNumberOfLines());
+      var existingDuplication = subProjectDuplications[sbd.key()];
+      if (existingDuplication) {
+        sbd.add(existingDuplication.getNumberOfLines);  
+      } else {
+        subProjectDuplications[sbd.key()] = sbd;
+      }      
     }
   }
+  for(duplicationKey in subProjectDuplications) {
+    if (subProjectDuplications.hasOwnProperty(duplicationKey)) {
+      var duplication = subProjectDuplications[duplicationKey];
+      edges.push({ from: duplication.k1, to: duplication.k2, value: duplication.getNumberOfLines() });
+    }
+  }
+
+  /*
+    var files = project.getFiles();
+    for (var i = 0; i < files.length; i++) {
+      var file = files[i];
+      nodes.push({ id: file.key, 'group': file.subProjectKey, title: file.key, value: file.numberOfDuplicatedLines });
+    }
+  
+    var duplications = project.getDuplications();
+    for (duplicationKey in duplications) {
+      if (duplications.hasOwnProperty(duplicationKey)) {
+        var duplication = duplications[duplicationKey];
+        edges.push({ from: duplication.getFile1().key, to: duplication.getFile2().key, value: duplication.getNumberOfLines() });
+      }
+    }
+    */
 
   var container = document.getElementById('container');
   var data = {
