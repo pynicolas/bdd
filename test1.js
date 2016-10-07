@@ -5,14 +5,6 @@ function onError(e) {
   console.log("Error!!");
 }
 
-var project = {
-  'subProjectKey': {
-    data: {
-      name: ''
-    }
-  }
-}
-
 function Project(projectKey) {
   var key = projectKey;
   var files = [];
@@ -187,7 +179,7 @@ function getProjectFilesWithDuplicatedLines(projectKey) {
 
   var qp = {
     asc: false,
-    ps: 20,
+    ps: 200,
     metricSortFilter: 'withMeasuresOnly',
     p: 1,
     s: 'metric,name',
@@ -220,12 +212,11 @@ function displayGraph(project) {
         var file = files[i];
         subProjectValue += file.numberOfDuplicatedLines;
       }
+      nodes.push({ id: subProjectKey, 'group': subProjectKey, title: subProjectKey, value: subProjectValue, shape: 'star' });
     }
-    nodes.push({ id: subProjectKey, 'group': subProjectKey, title: subProjectKey, value: subProjectValue });
   }
 
- var subProjectDuplications = {};
-
+  var subProjectDuplications = {};
 
   var duplications = project.getDuplications();
   for (duplicationKey in duplications) {
@@ -239,13 +230,13 @@ function displayGraph(project) {
       var sbd = new SubProjectDuplication(s1, s2, duplication.getNumberOfLines());
       var existingDuplication = subProjectDuplications[sbd.key()];
       if (existingDuplication) {
-        sbd.add(existingDuplication.getNumberOfLines);  
+        sbd.add(existingDuplication.getNumberOfLines);
       } else {
         subProjectDuplications[sbd.key()] = sbd;
-      }      
+      }
     }
   }
-  for(duplicationKey in subProjectDuplications) {
+  for (duplicationKey in subProjectDuplications) {
     if (subProjectDuplications.hasOwnProperty(duplicationKey)) {
       var duplication = subProjectDuplications[duplicationKey];
       edges.push({ from: duplication.k1, to: duplication.k2, value: duplication.getNumberOfLines() });
@@ -288,16 +279,146 @@ function displayGraph(project) {
     }
   };
   network = new vis.Network(container, data, options);
-  // network.on("selectNode", function (params) {
-  //   if (params.nodes.length == 1) {
-  //     if (network.isCluster(params.nodes[0]) == true) {
-  //       clusterAll();
-  //       network.openCluster(params.nodes[0]);
-  //     }
-  //   }
-  // });
+  network.on("selectNode", function (params) {
+    if (params.nodes.length == 1) {
+      var subProjectKey = params.nodes[0];
+      if (project.getFilesBySubProjectKey().hasOwnProperty(subProjectKey)) {
+
+        network.destroy();
+
+        displayHalfExplodedGraph(project, subProjectKey, subProjectDuplications);
+      }
+
+    }
+  });
 
   // clusterAll();
+}
+
+function displayHalfExplodedGraph(project, spk, subProjectDuplications) {
+  var nodes = [];
+  var edges = [];
+  var filesBySubProjectKey = project.getFilesBySubProjectKey();
+  for (var subProjectKey in filesBySubProjectKey) {
+    if (filesBySubProjectKey.hasOwnProperty(subProjectKey)) {
+      if (spk != subProjectKey) {
+        var files = filesBySubProjectKey[subProjectKey];
+        var subProjectValue = 0;
+        for (var i = 0; i < files.length; i++) {
+          var file = files[i];
+          subProjectValue += file.numberOfDuplicatedLines;
+        }
+        nodes.push({ id: subProjectKey, 'group': subProjectKey, title: subProjectKey, value: subProjectValue, shape: 'star' });
+      } else {
+        var files = filesBySubProjectKey[spk];
+        for (var i = 0; i < files.length; i++) {
+          var file = files[i];
+          nodes.push({ id: file.key, 'group': file.subProjectKey, title: file.key, value: file.numberOfDuplicatedLines });
+        }
+      }
+    }
+  }
+
+  var subProjectDuplications = {};
+
+  var duplications = project.getDuplications();
+  for (duplicationKey in duplications) {
+    if (duplications.hasOwnProperty(duplicationKey)) {
+      var duplication = duplications[duplicationKey];
+      var s1 = duplication.getFile1().subProjectKey;
+      var s2 = duplication.getFile2().subProjectKey;
+      if (s1 == s2) {
+        continue;
+      }
+      var sbd = new SubProjectDuplication(s1, s2, duplication.getNumberOfLines());
+      var existingDuplication = subProjectDuplications[sbd.key()];
+      if (existingDuplication) {
+        sbd.add(existingDuplication.getNumberOfLines);
+      } else {
+        subProjectDuplications[sbd.key()] = sbd;
+      }
+    }
+  }
+
+  for (duplicationKey in subProjectDuplications) {
+    if (subProjectDuplications.hasOwnProperty(duplicationKey)) {
+      var duplication = subProjectDuplications[duplicationKey];
+      if (duplication.k1 != spk && duplication.k2 != spk) {
+        edges.push({ from: duplication.k1, to: duplication.k2, value: duplication.getNumberOfLines() });
+      }
+    }
+  }
+
+  var duplications = project.getDuplications();
+  var dict = {};
+  for (duplicationKey in duplications) {
+    if (duplications.hasOwnProperty(duplicationKey)) {
+      var duplication = duplications[duplicationKey];
+      if (duplication.getFile1().subProjectKey == spk &&
+        duplication.getFile2().subProjectKey == spk) {
+        edges.push({ from: duplication.getFile1().key, to: duplication.getFile2().key, value: duplication.getNumberOfLines() });
+      } else {
+        var otherSubProject = null;
+        var file = null;
+        if (duplication.getFile1().subProjectKey == spk){
+          otherSubProject = duplication.getFile2().subProjectKey;
+          file = duplication.getFile1().key;
+        } else {
+          otherSubProject = duplication.getFile1().subProjectKey;
+          file = duplication.getFile2().key;
+        }
+
+        var sbd = new SubProjectDuplication(otherSubProject, file, duplication.getNumberOfLines());
+        var existingDuplication = dict[sbd.key()];
+        if (existingDuplication) {
+          sbd.add(existingDuplication.getNumberOfLines);
+        } else {
+          dict[sbd.key()] = sbd;
+        }
+      }
+    }
+  }
+
+  for (duplicationKey in dict) {
+    if (dict.hasOwnProperty(duplicationKey)) {
+      var duplication = dict[duplicationKey];
+      edges.push({ from: duplication.k1, to: duplication.k2, value: duplication.getNumberOfLines() });
+    }
+  }
+
+  var container = document.getElementById('container');
+  var data = {
+    nodes: nodes,
+    edges: edges
+  };
+  var options = {
+    layout: {
+      improvedLayout: false
+    },
+    nodes: {
+      shape: 'dot'
+    },
+    physics: {
+      barnesHut: {
+        gravitationalConstant: -60000,
+        springConstant: 0.02
+      }
+    }
+  };
+  network = new vis.Network(container, data, options);
+  network.on("selectNode", function (params) {
+    if (params.nodes.length == 1) {
+      var subProjectKey = params.nodes[0];
+      if (project.getFilesBySubProjectKey().hasOwnProperty(subProjectKey)) {
+
+        network.destroy();
+
+        displayHalfExplodedGraph(project, subProjectKey, subProjectDuplications);
+      }
+
+    }
+  });
+
 }
 
 function clusterAll() {
