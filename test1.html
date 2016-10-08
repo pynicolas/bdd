@@ -7,6 +7,9 @@
 </head>
 
 <body>
+    <input type="text" id="server" value="http://sonarqube.com/"/>
+    <input type="text" id="projectKey" value="org.sonarsource.java:java"/>
+    <button onclick="loadProject(document.getElementById('server').value, document.getElementById('projectKey').value)">Show!</button>
     <div id="container"></div>
 </body>
 

@@ -1,6 +1,3 @@
-//var SERVER = "http://192.168.1.69:9000/";
-var SERVER = "http://sonarqube.com/";
-
 function onError(e) {
   console.log("Error!!");
 }
@@ -127,7 +124,7 @@ var graphEdges = new vis.DataSet([]);
 
 var network = null;
 
-function getProjectFilesWithDuplicatedLines(projectKey) {
+function loadProject(server, projectKey) {
   var project = new Project(projectKey);
   var onLoad = function () {
     var response = JSON.parse(this.responseText);
@@ -173,7 +170,7 @@ function getProjectFilesWithDuplicatedLines(projectKey) {
 
       }
 
-      sendQuery('api/duplications/show', { 'key': file.key }, fetchDuplications(file.key));
+      sendQuery(server, 'api/duplications/show', { 'key': file.key }, fetchDuplications(file.key));
     }
   }
 
@@ -189,7 +186,7 @@ function getProjectFilesWithDuplicatedLines(projectKey) {
     baseComponentKey: projectKey
   };
 
-  sendQuery('api/measures/component_tree', qp, onLoad);
+  sendQuery(server, 'api/measures/component_tree', qp, onLoad);
 }
 
 function compare(a, b) {
@@ -447,8 +444,8 @@ function doCluster(currentGroup) {
   network.cluster(clusterOptionsByData);
 }
 
-function sendQuery(baseWs, parameter, callback) {
-  var url = SERVER + baseWs;
+function sendQuery(server, baseWs, parameter, callback) {
+  var url = server + baseWs;
 
   if (parameter != null) {
     var queryString = [];
@@ -478,11 +475,4 @@ function sendQuery(baseWs, parameter, callback) {
   req.onload = cachingCallback;
   req.onerror = onError;
   req.send(null);
-}
-
-
-window.onload = function () {
-  getProjectFilesWithDuplicatedLines('org.sonarsource.java:java');
-  //getProjectFilesWithDuplicatedLines('sa-dotnet');
-  //getProjectFilesWithDuplicatedLines('org.sonarsource.sonarqube:sonarqube');
 }
