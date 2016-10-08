@@ -1,5 +1,5 @@
-var SERVER = "http://192.168.1.69:9000/";
-//var SERVER = "http://sonarqube.com/";
+//var SERVER = "http://192.168.1.69:9000/";
+var SERVER = "http://sonarqube.com/";
 
 function onError(e) {
   console.log("Error!!");
@@ -259,7 +259,6 @@ function displayGraph(project) {
     }
     */
 
-  var container = document.getElementById('container');
   var data = {
     nodes: nodes,
     edges: edges
@@ -360,7 +359,7 @@ function displayHalfExplodedGraph(project, spk, subProjectDuplications) {
       } else {
         var otherSubProject = null;
         var file = null;
-        if (duplication.getFile1().subProjectKey == spk){
+        if (duplication.getFile1().subProjectKey == spk) {
           otherSubProject = duplication.getFile2().subProjectKey;
           file = duplication.getFile1().key;
         } else {
@@ -401,8 +400,8 @@ function displayHalfExplodedGraph(project, spk, subProjectDuplications) {
     physics: {
       barnesHut: {
         centralGravity: 0.5,
-//        gravitationalConstant: -500,
-//        springConstant: 0.01
+        //        gravitationalConstant: -500,
+        //        springConstant: 0.01
       }
     }
   };
@@ -449,8 +448,6 @@ function doCluster(currentGroup) {
 }
 
 function sendQuery(baseWs, parameter, callback) {
-
-  var req = new XMLHttpRequest();
   var url = SERVER + baseWs;
 
   if (parameter != null) {
@@ -465,13 +462,27 @@ function sendQuery(baseWs, parameter, callback) {
     url += '?' + queryString
   }
 
+  var cached = localStorage.getItem(url);
+  if (cached) {
+    callback.bind({ responseText: cached })();
+    return;
+  }
+
+  var cachingCallback = function () {
+    localStorage.setItem(url, this.responseText);
+    callback.bind(this)();
+  };
+
+  var req = new XMLHttpRequest();
   req.open("GET", url, true);
-  req.onload = callback;
+  req.onload = cachingCallback;
   req.onerror = onError;
   req.send(null);
 }
 
 
-//getProjectFilesWithDuplicatedLines('org.sonarsource.java:java');
-getProjectFilesWithDuplicatedLines('sa-dotnet');
-//getProjectFilesWithDuplicatedLines('org.sonarsource.sonarqube:sonarqube');
+window.onload = function () {
+  getProjectFilesWithDuplicatedLines('org.sonarsource.java:java');
+  //getProjectFilesWithDuplicatedLines('sa-dotnet');
+  //getProjectFilesWithDuplicatedLines('org.sonarsource.sonarqube:sonarqube');
+}
