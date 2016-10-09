@@ -3,178 +3,55 @@ function onError(e) {
 }
 
 function Project(projectKey) {
-  var key = projectKey;
-  var files = [];
-  var filesByFileKey = {};
-  var filesBySubProjectKey = {};
-  var subProjectKeys = {};
-  var duplications = {};
-  this.addFile = function (file) {
-    files.push(file);
-    subProjectKeys[file.subProjectKey] = 1;
-    var subProjectFiles = filesBySubProjectKey[file.subProjectKey];
-    if (!subProjectFiles) {
-      subProjectFiles = [];
-      filesBySubProjectKey[file.subProjectKey] = subProjectFiles;
-    }
-    subProjectFiles.push(file);
-    filesByFileKey[file.key] = file;
-  }
+  this.key = projectKey;
+  this.files = [];
+  this.duplications = [];
 
-  this.getFiles = function () {
-    return files;
-  }
+  var isInProject = function (fileKey) {
+    return fileKey.startsWith(projectKey);
+  };
 
-  this.getFilesBySubProjectKey = function () {
-    return filesBySubProjectKey;
-  }
+  this.addFile = function (fileKey, numberOfDuplicatedLines) {
+    this.files.push({ key: fileKey, numberOfDuplicatedLines: +numberOfDuplicatedLines });
+  };
 
-  this.getDuplications = function () {
-    return duplications;
-  }
-
-  var fileByFileKey = function (fileKey) {
-    return filesByFileKey[fileKey];
-  }
   this.addDuplication = function (fileKey1, fileKey2, numberOfLines) {
-    var file1 = fileByFileKey(fileKey1);
-    var file2 = fileByFileKey(fileKey2);
-
-    if (!file1 || !file2) {
-      return;
+    if (!isInProject(fileKey1) || !isInProject(fileKey2) || fileKey1 != fileKey2) {
+      this.duplications.push({ file1: fileKey1, file2: fileKey2, numberOfLines: numberOfLines });
     }
-
-    var duplication = new Duplication(file1, file2, numberOfLines);
-    var existingDuplication = duplications[duplication.key()];
-    if (existingDuplication) {
-      existingDuplication.add(numberOfLines)
-      duplication = existingDuplication;
-    }
-    duplications[duplication.key()] = duplication;
-  }
-  this.numberOfFiles = function () {
-    return files.length;
-  }
+  };
 }
-
-function File(fileKey, numberOfDuplicatedLines) {
-  this.key = fileKey;
-  this.numberOfDuplicatedLines = numberOfDuplicatedLines;
-  this.subProjectKey = fileKey.substring(0, fileKey.lastIndexOf(':'));
-}
-
-function Duplication(f1, f2, numberOfLines) {
-  var file1 = f1;
-  var file2 = f2;
-  var numberOfLines = numberOfLines;
-  this.key = function () {
-    var result = compare(file1.key, file2.key);
-    return result.min + '-' + result.max;
-  }
-  this.add = function (additionalNumberOfLines) {
-    numberOfLines += additionalNumberOfLines;
-  }
-
-  var self = this;
-  this.toString = function () {
-    return file1 + '^^^' + file2 + '^^^' + numberOfLines;
-  }
-
-  this.getFile1 = function () {
-    return file1;
-  }
-  this.getFile2 = function () {
-    return file2;
-  }
-  this.getNumberOfLines = function () {
-    return numberOfLines / 2;
-  }
-}
-
-function SubProjectDuplication(k1, k2, numberOfLines) {
-  this.k1 = k1;
-  this.k2 = k2;
-  var numberOfLines = numberOfLines;
-  this.key = function () {
-    var result = compare(k1, k2);
-    return result.min + '-' + result.max;
-  }
-  this.add = function (additionalNumberOfLines) {
-    numberOfLines += additionalNumberOfLines;
-  }
-
-  var self = this;
-  this.toString = function () {
-    return k1 + '^^^' + k2 + '^^^' + numberOfLines;
-  }
-
-  this.getNumberOfLines = function () {
-    return numberOfLines;
-  }
-}
-
-var nodeKeys = {};
-var edges = {};
-
-var groups = [];
-
-var graphNodes = new vis.DataSet([]);
-var graphEdges = new vis.DataSet([]);
-
-
-var network = null;
 
 function loadProject(server, projectKey) {
   var project = new Project(projectKey);
-  var onLoad = function () {
-    var response = JSON.parse(this.responseText);
-    var files = response.components;
+  var responseCounts = 0;
 
-    var responseCounts = 0;
-
-    for (var i = 0; i < files.length; i++) {
-      var file = files[i];
-
-      var numberOfDuplicatedLines = file.measures[0].value;
-      if (numberOfDuplicatedLines == 0) {
-        continue;
+  var fetchDuplications = function (fromKey) {
+    sendQuery(server, 'api/duplications/show', { 'key': fromKey }, function () {
+      responseCounts++;
+      var edgeResponse = JSON.parse(this.responseText);
+      var fileKeysByRef = {};
+      for (var fileRef in edgeResponse.files) {
+        fileKeysByRef[fileRef] = edgeResponse.files[fileRef].key;
       }
-
-      var projectFile = new File(file.key, numberOfDuplicatedLines);
-      project.addFile(projectFile);
-
-      function fetchDuplications(fromKey) {
-        return function () {
-          responseCounts++;
-          var edgeResponse = JSON.parse(this.responseText);
-          var fileKeysByRef = {};
-          for (var fileRef in edgeResponse.files) {
-            fileKeysByRef[fileRef] = edgeResponse.files[fileRef].key;
-          }
-          for (var d in edgeResponse.duplications) {
-            var blocks = edgeResponse.duplications[d].blocks;
-            for (var i = 0; i < blocks.length; i++) {
-              var block = blocks[i];
-              var fileKey = fileKeysByRef[block._ref];
-              if (fileKey != fromKey) {
-                var numberOfLinesInBlock = block.size;
-                project.addDuplication(fromKey, fileKey, numberOfLinesInBlock);
-              }
-            }
-          }
-          if (project.numberOfFiles() == responseCounts) {
-            displayGraph(project);
+      for (var d in edgeResponse.duplications) {
+        var blocks = edgeResponse.duplications[d].blocks;
+        for (var i = 0; i < blocks.length; i++) {
+          var block = blocks[i];
+          var fileKey = fileKeysByRef[block._ref];
+          if (fileKey != fromKey) {
+            var numberOfLinesInBlock = block.size;
+            project.addDuplication(fromKey, fileKey, numberOfLinesInBlock);
           }
         }
-
-
       }
-
-      sendQuery(server, 'api/duplications/show', { 'key': file.key }, fetchDuplications(file.key));
-    }
+      if (project.files.length == responseCounts) {
+        displayGraph(project, null);
+      }
+    });
   }
 
-  var qp = {
+  var params = {
     asc: false,
     ps: 200,
     metricSortFilter: 'withMeasuresOnly',
@@ -186,78 +63,71 @@ function loadProject(server, projectKey) {
     baseComponentKey: projectKey
   };
 
-  sendQuery(server, 'api/measures/component_tree', qp, onLoad);
-}
+  sendQuery(server, 'api/measures/component_tree', params, function () {
+    var response = JSON.parse(this.responseText);
+    var files = response.components;
+    var responseCounts = 0;
 
-function compare(a, b) {
-  if (a < b) {
-    return { min: a, max: b };
-  }
-  return { min: b, max: a };
-}
-
-
-function displayGraph(project) {
-  var nodes = [];
-  var edges = [];
-  var filesBySubProjectKey = project.getFilesBySubProjectKey();
-  for (var subProjectKey in filesBySubProjectKey) {
-    if (filesBySubProjectKey.hasOwnProperty(subProjectKey)) {
-      var files = filesBySubProjectKey[subProjectKey];
-      var subProjectValue = 0;
-      for (var i = 0; i < files.length; i++) {
-        var file = files[i];
-        subProjectValue += file.numberOfDuplicatedLines;
-      }
-      nodes.push({ id: subProjectKey, 'group': subProjectKey, title: subProjectKey, value: subProjectValue });
-    }
-  }
-
-  var subProjectDuplications = {};
-
-  var duplications = project.getDuplications();
-  for (duplicationKey in duplications) {
-    if (duplications.hasOwnProperty(duplicationKey)) {
-      var duplication = duplications[duplicationKey];
-      var s1 = duplication.getFile1().subProjectKey;
-      var s2 = duplication.getFile2().subProjectKey;
-      if (s1 == s2) {
-        continue;
-      }
-      var sbd = new SubProjectDuplication(s1, s2, duplication.getNumberOfLines());
-      var existingDuplication = subProjectDuplications[sbd.key()];
-      if (existingDuplication) {
-        sbd.add(existingDuplication.getNumberOfLines);
-      } else {
-        subProjectDuplications[sbd.key()] = sbd;
-      }
-    }
-  }
-  for (duplicationKey in subProjectDuplications) {
-    if (subProjectDuplications.hasOwnProperty(duplicationKey)) {
-      var duplication = subProjectDuplications[duplicationKey];
-      edges.push({ from: duplication.k1, to: duplication.k2, value: duplication.getNumberOfLines() });
-    }
-  }
-
-  /*
-    var files = project.getFiles();
     for (var i = 0; i < files.length; i++) {
       var file = files[i];
-      nodes.push({ id: file.key, 'group': file.subProjectKey, title: file.key, value: file.numberOfDuplicatedLines });
-    }
-  
-    var duplications = project.getDuplications();
-    for (duplicationKey in duplications) {
-      if (duplications.hasOwnProperty(duplicationKey)) {
-        var duplication = duplications[duplicationKey];
-        edges.push({ from: duplication.getFile1().key, to: duplication.getFile2().key, value: duplication.getNumberOfLines() });
+      var numberOfDuplicatedLines = file.measures[0].value;
+      if (numberOfDuplicatedLines == 0) {
+        continue;
       }
+      project.addFile(file.key, numberOfDuplicatedLines);
     }
-    */
 
+    for (var i = 0; i < project.files.length; i++) {
+      fetchDuplications(project.files[i].key);
+    }
+  });
+}
+
+function getSubProjectKey(fileKey) {
+  return fileKey.substring(0, fileKey.lastIndexOf(':'));
+}
+
+function displayGraph(project, subProjectKey) {
+  var mapKey = function (fileKey) {
+    return (subProjectKey && fileKey.startsWith(subProjectKey)) ? fileKey : getSubProjectKey(fileKey);
+  }
+
+  var nodes = [];
+  var nodeIndexByKey = {};
+  var files = project.files;
+  for (var i = 0; i < files.length; i++) {
+    var file = files[i];
+    var key = mapKey(file.key);
+    if (nodeIndexByKey.hasOwnProperty(key)) {
+      nodes[nodeIndexByKey[key]].value += file.numberOfDuplicatedLines;
+    } else {
+      nodes.push({ id: key, 'group': getSubProjectKey(file.key), title: key, value: file.numberOfDuplicatedLines });
+      nodeIndexByKey[key] = nodes.length - 1;
+    }
+  }
+
+  var edges = [];
+  var edgeIndexByKey = {};
+  var duplications = project.duplications;
+  for (var i = 0; i < duplications.length; i++) {
+    var duplication = duplications[i];
+    var key1 = mapKey(duplication.file1);
+    var key2 = mapKey(duplication.file2);
+    if (key1 == key2) {
+      continue;
+    }
+    var duplicationKey = key1 > key2 ? key1 + '-' + key2 : key2 + '-' + key1;
+    if (edgeIndexByKey.hasOwnProperty(duplicationKey)) {
+      edges[edgeIndexByKey[duplicationKey]].value += duplication.numberOfLines;
+    } else {
+      edges.push({ id: duplicationKey, from: key1, to: key2, value: duplication.numberOfLines });
+      edgeIndexByKey[duplicationKey] = edges.length - 1;
+    }
+  }
+
+  var nodeSet = new vis.DataSet(nodes, {});
   var data = {
-    nodes: nodes,
+    nodes: nodeSet,
     edges: edges
   };
   var options = {
@@ -269,179 +139,22 @@ function displayGraph(project) {
     },
     physics: {
       barnesHut: {
+        //centralGravity: 0.5,
         gravitationalConstant: -60000,
         springConstant: 0.02
       }
     }
   };
-  network = new vis.Network(container, data, options);
+  var network = new vis.Network(container, data, options);
   network.on("selectNode", function (params) {
     if (params.nodes.length == 1) {
-      var subProjectKey = params.nodes[0];
-      if (project.getFilesBySubProjectKey().hasOwnProperty(subProjectKey)) {
-
-        network.destroy();
-
-        displayHalfExplodedGraph(project, subProjectKey, subProjectDuplications);
-      }
-
+      var nodeId = params.nodes[0];
+      var node = nodeSet.get(nodeId);
+      network.destroy();
+      displayGraph(project, node.group == node.id ? node.group : null);
     }
   });
 
-  // clusterAll();
-}
-
-function displayHalfExplodedGraph(project, spk, subProjectDuplications) {
-  var nodes = [];
-  var edges = [];
-  var filesBySubProjectKey = project.getFilesBySubProjectKey();
-  for (var subProjectKey in filesBySubProjectKey) {
-    if (filesBySubProjectKey.hasOwnProperty(subProjectKey)) {
-      if (spk != subProjectKey) {
-        var files = filesBySubProjectKey[subProjectKey];
-        var subProjectValue = 0;
-        for (var i = 0; i < files.length; i++) {
-          var file = files[i];
-          subProjectValue += file.numberOfDuplicatedLines;
-        }
-        nodes.push({ id: subProjectKey, 'group': subProjectKey, title: subProjectKey, value: subProjectValue });
-      } else {
-        var files = filesBySubProjectKey[spk];
-        for (var i = 0; i < files.length; i++) {
-          var file = files[i];
-          nodes.push({ id: file.key, 'group': file.subProjectKey, title: file.key, value: file.numberOfDuplicatedLines });
-        }
-      }
-    }
-  }
-
-  var subProjectDuplications = {};
-
-  var duplications = project.getDuplications();
-  for (duplicationKey in duplications) {
-    if (duplications.hasOwnProperty(duplicationKey)) {
-      var duplication = duplications[duplicationKey];
-      var s1 = duplication.getFile1().subProjectKey;
-      var s2 = duplication.getFile2().subProjectKey;
-      if (s1 == s2) {
-        continue;
-      }
-      var sbd = new SubProjectDuplication(s1, s2, duplication.getNumberOfLines());
-      var existingDuplication = subProjectDuplications[sbd.key()];
-      if (existingDuplication) {
-        sbd.add(existingDuplication.getNumberOfLines);
-      } else {
-        subProjectDuplications[sbd.key()] = sbd;
-      }
-    }
-  }
-
-  for (duplicationKey in subProjectDuplications) {
-    if (subProjectDuplications.hasOwnProperty(duplicationKey)) {
-      var duplication = subProjectDuplications[duplicationKey];
-      if (duplication.k1 != spk && duplication.k2 != spk) {
-        edges.push({ from: duplication.k1, to: duplication.k2, value: duplication.getNumberOfLines() });
-      }
-    }
-  }
-
-  var duplications = project.getDuplications();
-  var dict = {};
-  for (duplicationKey in duplications) {
-    if (duplications.hasOwnProperty(duplicationKey)) {
-      var duplication = duplications[duplicationKey];
-      if (duplication.getFile1().subProjectKey == spk &&
-        duplication.getFile2().subProjectKey == spk) {
-        edges.push({ from: duplication.getFile1().key, to: duplication.getFile2().key, value: duplication.getNumberOfLines() });
-      } else {
-        var otherSubProject = null;
-        var file = null;
-        if (duplication.getFile1().subProjectKey == spk) {
-          otherSubProject = duplication.getFile2().subProjectKey;
-          file = duplication.getFile1().key;
-        } else {
-          otherSubProject = duplication.getFile1().subProjectKey;
-          file = duplication.getFile2().key;
-        }
-
-        var sbd = new SubProjectDuplication(otherSubProject, file, duplication.getNumberOfLines());
-        var existingDuplication = dict[sbd.key()];
-        if (existingDuplication) {
-          sbd.add(existingDuplication.getNumberOfLines);
-        } else {
-          dict[sbd.key()] = sbd;
-        }
-      }
-    }
-  }
-
-  for (duplicationKey in dict) {
-    if (dict.hasOwnProperty(duplicationKey)) {
-      var duplication = dict[duplicationKey];
-      edges.push({ from: duplication.k1, to: duplication.k2, value: duplication.getNumberOfLines() });
-    }
-  }
-
-  var container = document.getElementById('container');
-  var data = {
-    nodes: nodes,
-    edges: edges
-  };
-  var options = {
-    layout: {
-      improvedLayout: false
-    },
-    nodes: {
-      shape: 'dot'
-    },
-    physics: {
-      barnesHut: {
-        centralGravity: 0.5,
-        //        gravitationalConstant: -500,
-        //        springConstant: 0.01
-      }
-    }
-  };
-  network = new vis.Network(container, data, options);
-  network.on("selectNode", function (params) {
-    if (params.nodes.length == 1) {
-      var subProjectKey = params.nodes[0];
-      if (project.getFilesBySubProjectKey().hasOwnProperty(subProjectKey)) {
-
-        network.destroy();
-
-        displayHalfExplodedGraph(project, subProjectKey, subProjectDuplications);
-      }
-
-    }
-  });
-
-}
-
-function clusterAll() {
-  for (var i = 0; i < groups.length; i++) {
-    var currentGroup = groups[i];
-    doCluster(currentGroup);
-  }
-}
-
-function doCluster(currentGroup) {
-  var clusterOptionsByData = {
-    joinCondition: function (childOptions) {
-      return childOptions.group == currentGroup;
-    },
-    processProperties: function (clusterOptions, childNodes, childEdges) {
-      var totalMass = 0;
-      for (var i = 0; i < childNodes.length; i++) {
-        totalMass += childNodes[i].value;
-        clusterOptions.color = childNodes[i].color;
-      }
-      clusterOptions.value = totalMass;
-      return clusterOptions;
-    },
-    clusterNodeProperties: { id: 'cluster:' + currentGroup, borderWidth: 3, shape: 'dot', title: currentGroup, label: '' }
-  };
-  network.cluster(clusterOptionsByData);
 }
 
 function sendQuery(server, baseWs, parameter, callback) {
