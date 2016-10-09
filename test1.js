@@ -96,7 +96,7 @@ function displayGraph(project, subProjectKey) {
   var nodeIndexByKey = {};
   var files = project.files;
   var fileNodeColor = '#6699ee';
-  var groupNodeColor = '#cccccc';
+  var groupNodeColor = '#bbccee';
   for (var i = 0; i < files.length; i++) {
     var file = files[i];
     var key = mapKey(file.key);
@@ -123,10 +123,21 @@ function displayGraph(project, subProjectKey) {
     if (key1 == key2) {
       continue;
     }
+
+    if (!nodeIndexByKey.hasOwnProperty(key2)) {
+      // cross-project duplication
+      var otherProjectKey = key2.substring(0, key2.indexOf(':'));
+      if (!nodeIndexByKey.hasOwnProperty(otherProjectKey)) {
+        nodes.push({ id: otherProjectKey, label: otherProjectKey, value: 10, mass: 2.5, color: '#cccccc' });
+        nodeIndexByKey[otherProjectKey] = nodes.length - 1;
+      }
+      key2 = otherProjectKey;
+    }
     var duplicationKey = key1 > key2 ? key1 + '-' + key2 : key2 + '-' + key1;
     if (edgeIndexByKey.hasOwnProperty(duplicationKey)) {
       edges[edgeIndexByKey[duplicationKey]].value += duplication.numberOfLines;
     } else {
+      console.log(duplicationKey);
       edges.push({ id: duplicationKey, from: key1, to: key2, value: duplication.numberOfLines });
       edgeIndexByKey[duplicationKey] = edges.length - 1;
     }
