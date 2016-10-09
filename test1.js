@@ -95,13 +95,20 @@ function displayGraph(project, subProjectKey) {
   var nodes = [];
   var nodeIndexByKey = {};
   var files = project.files;
+  var fileNodeColor = '#6699ee';
+  var groupNodeColor = '#cccccc';
   for (var i = 0; i < files.length; i++) {
     var file = files[i];
     var key = mapKey(file.key);
     if (nodeIndexByKey.hasOwnProperty(key)) {
       nodes[nodeIndexByKey[key]].value += file.numberOfDuplicatedLines;
     } else {
-      nodes.push({ id: key, 'group': getSubProjectKey(file.key), title: key, value: file.numberOfDuplicatedLines });
+      var isFileNode = file.key == key;
+      var mass = isFileNode ? 1 : 2;
+      var color = isFileNode ? fileNodeColor : groupNodeColor;
+      var name = key.substring(key.lastIndexOf(':') + 1);
+      var label = name.lastIndexOf('/') > -1 ? name.substring(name.lastIndexOf('/') + 1) : name;
+      nodes.push({ id: key, 'group': getSubProjectKey(file.key), title: name, label: label, value: file.numberOfDuplicatedLines, mass: mass, color: color });
       nodeIndexByKey[key] = nodes.length - 1;
     }
   }
@@ -140,12 +147,12 @@ function displayGraph(project, subProjectKey) {
     physics: {
       barnesHut: {
         //centralGravity: 0.5,
-        gravitationalConstant: -60000,
+        gravitationalConstant: -1000,
         springConstant: 0.02
       }
     }
   };
-  var network = new vis.Network(container, data, options);
+  var network = new vis.Network(document.getElementById('container'), data, options);
   network.on("selectNode", function (params) {
     if (params.nodes.length == 1) {
       var nodeId = params.nodes[0];
@@ -154,7 +161,7 @@ function displayGraph(project, subProjectKey) {
       displayGraph(project, node.group == node.id ? node.group : null);
     }
   });
-
+  document.getElementById('graph-title').innerText = subProjectKey ? subProjectKey : project.key;
 }
 
 function sendQuery(server, baseWs, parameter, callback) {
